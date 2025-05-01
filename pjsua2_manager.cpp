@@ -145,7 +145,7 @@ class PJSUA2Manager{
                     }
                 }
 
-                virtual void onCallMediaState(OnCallMediaStateParam &prm){
+                virtual void onCallMediaState(OnCallMediaStateParam &prm) override{
                     CallInfo callInfo = getInfo();
                     // bind media
                     for(unsigned i = 0; i < callInfo.media.size(); i++){
