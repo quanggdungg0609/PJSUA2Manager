@@ -76,17 +76,18 @@ class PJSUA2Manager{
 
                 virtual void onIncomingCall(OnIncomingCallParam &prm) override {
                     auto call = make_unique<PJSUA2Call>(this->m_manager, *this, prm.callId);
-
-                    CallOpParam callParam;
-                    callParam.statusCode = PJSIP_SC_OK;
+                    string callId = call->getInfo().callIdString;
+                    {
+                        lock_guard<mutex> lock(m_manager._mutex);
+                        m_manager._inboundCalls[callId] = std::move(call);
+                    }
                     if (m_manager._onIncomingCallStateCb) {
-                        m_manager._onIncomingCallStateCb(call->getInfo().callIdString.c_str());
+                        m_manager._onIncomingCallStateCb(callId.c_str());
                     }
                     else{
                         cout << "Call from: " << prm.callId << endl;
                     }
-                    lock_guard<mutex> lock(m_manager._mutex);
-                    m_manager._inboundCalls[call->getInfo().callIdString] = std::move(call);
+                    
                 }
         };
 
@@ -271,7 +272,7 @@ class PJSUA2Manager{
                 CallOpParam prm(true); // Use default call settings
                 newCall->makeCall(dest_uri, prm);
                 lock_guard<mutex> lock(_mutex);
-                _outboundCalls[callId] = unique_ptr<Call>(newCall);
+                _outboundCalls[callId] = move(newCall);
             }catch(const Error &e){
                 _handleError(e);
             }

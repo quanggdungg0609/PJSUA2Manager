@@ -20,3 +20,4 @@ libpjsua2_manager.so
 *~
 *.swp
 .DS_Store
+.vscode/
