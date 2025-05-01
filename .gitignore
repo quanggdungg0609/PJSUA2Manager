@@ -1,0 +1,22 @@
+# Ignore the test file
+test.cpp
+
+# Ignore the compiled binary
+sip_call3
+
+# (Optional) Ignore the shared library if you don't want to track it
+libpjsua2_manager.so
+
+# (Optional) Common build artifacts
+*.o
+*.lo
+*.la
+*.al
+*.so
+*.so.*
+*.a
+
+# (Optional) Backup and editor files
+*~
+*.swp
+.DS_Store
