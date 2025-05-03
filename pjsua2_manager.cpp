@@ -1,124 +1,118 @@
 #include "pjsua2_manager.hpp"
 
-class PJSUA2Manager::PJSUA2Account : public Account {
-    private:
-        PJSUA2Manager& m_manager;
-    public:
-        PJSUA2Account(PJSUA2Manager& manager) : m_manager(manager) {}
-        void onRegState(OnRegStateParam &prm) override {
-            AccountInfo info = getInfo();
-            if (m_manager._onRegStateCb) {
-                m_manager._onRegStateCb(prm.code, info.regIsActive ? "Active" : "Inactive", prm.reason.c_str());
-            }
-        }
-        void onIncomingCall(OnIncomingCallParam &prm) override {
-            if (!m_manager._account) {
-                throw Error("Account not initialized");
-            }
-            auto call = make_unique<PJSUA2Manager::PJSUA2Call>(m_manager, *this, prm.callId);
-            string callId = call->getInfo().callIdString;
+void PJSUA2Manager::PJSUA2Account::onRegState(OnRegStateParam &prm) {
+    AccountInfo info = getInfo();
+    if (m_manager._onRegStateCb) {
+        m_manager._onRegStateCb(prm.code, info.regIsActive ? "Active" : "Inactive", prm.reason.c_str());
+    }
+}
 
+void PJSUA2Manager::PJSUA2Account::onIncomingCall(OnIncomingCallParam &prm) {
+    if (!m_manager._account) {
+        throw Error(
+            PJ_EBUG, 
+            "Account Error", 
+            "Account not initialized", 
+            __FILE__, 
+            __LINE__
+        );
+    }
+    auto call = make_unique<PJSUA2Manager::PJSUA2Call>(m_manager, *this, prm.callId);
+    string callId = call->getInfo().callIdString;
+        
+    {
+        lock_guard<mutex> lock(m_manager._mutex);
+        m_manager._inboundCalls[callId] = move(call);
+    }
+                    
+    if (m_manager._onIncomingCallStateCb) {
+        m_manager._onIncomingCallStateCb(callId.c_str());
+    }
+}
+
+PJSUA2Manager::PJSUA2Call::PJSUA2Call(PJSUA2Manager& manager, Account &acc, int call_id) : Call(acc, call_id), m_manager(manager) {}
+
+void PJSUA2Manager::PJSUA2Call::onCallState(OnCallStateParam &prm) {
+    PJ_UNUSED_ARG(prm);
+
+    CallInfo callInfo = getInfo();
+            
+    if(m_manager._onCallStateCb){
+        m_manager._onCallStateCb(
+            callInfo.remoteUri.c_str(),
+            callInfo.stateText.c_str()
+        );
+    }
+    
+    switch(callInfo.state){
+        case PJSIP_INV_STATE_NULL:
+            break;
+        case PJSIP_INV_STATE_CALLING:
+            break;
+        case PJSIP_INV_STATE_INCOMING:
+            break;
+        case PJSIP_INV_STATE_EARLY:
+            break;
+        case PJSIP_INV_STATE_CONNECTING:
             {
                 lock_guard<mutex> lock(m_manager._mutex);
-                m_manager._inboundCalls[callId] = move(call);
-            }
-            
-            if (m_manager._onIncomingCallStateCb) {
-                m_manager._onIncomingCallStateCb(callId.c_str());
-            }
-        }
-};
-    
-
-class PJSUA2Manager::PJSUA2Call : public Call{
-    private:
-    PJSUA2Manager& m_manager;
-
-public:
-    PJSUA2Call(PJSUA2Manager& manager, Account &acc, int call_id) : Call(acc, call_id), m_manager(manager) {}
-
-    virtual void onCallState(OnCallStateParam &prm) override{
-        PJ_UNUSED_ARG(prm);
-
-        CallInfo callInfo = getInfo();
-        
-        if(m_manager._onCallStateCb){
-            m_manager._onCallStateCb(
-                callInfo.remoteUri.c_str(),
-                callInfo.stateText.c_str()
-            );
-        }
-
-        switch(callInfo.state){
-            case PJSIP_INV_STATE_NULL:
-                break;
-            case PJSIP_INV_STATE_CALLING:
-                break;
-            case PJSIP_INV_STATE_INCOMING:
-                break;
-            case PJSIP_INV_STATE_EARLY:
-                break;
-            case PJSIP_INV_STATE_CONNECTING:
-                {
-                    lock_guard<mutex> lock(m_manager._mutex);
-                    string callId = callInfo.callIdString;
-                    if (auto it = m_manager._inboundCalls.find(callId); it != m_manager._inboundCalls.end()) {
-                        m_manager._activeCalls[callId] = std::move(it->second);
-                        m_manager._inboundCalls.erase(it);
-                    }
-                    if (auto it = m_manager._outboundCalls.find(callId); it != m_manager._outboundCalls.end()) {
-                        m_manager._activeCalls[callId] = std::move(it->second);
-                        m_manager._outboundCalls.erase(it);
-                    }
+                string callId = callInfo.callIdString;
+                if (auto it = m_manager._inboundCalls.find(callId); it != m_manager._inboundCalls.end()) {
+                    m_manager._activeCalls[callId] = std::move(it->second);
+                    m_manager._inboundCalls.erase(it);
                 }
-                break;
-            case PJSIP_INV_STATE_CONFIRMED:
-                break;
-            case PJSIP_INV_STATE_DISCONNECTED:
-                {
-                    lock_guard<mutex> lock(m_manager._mutex);
-                    string callId = callInfo.callIdString;
-                    
-                    // delete call from all maps
-                    m_manager._activeCalls.erase(callId);
-                    m_manager._inboundCalls.erase(callId);
-                    m_manager._outboundCalls.erase(callId);
+                if (auto it = m_manager._outboundCalls.find(callId); it != m_manager._outboundCalls.end()) {
+                    m_manager._activeCalls[callId] = std::move(it->second);
+                    m_manager._outboundCalls.erase(it);
                 }
-                break;
+            }
+            break;
+                case PJSIP_INV_STATE_CONFIRMED:
+                    break;
+                case PJSIP_INV_STATE_DISCONNECTED:
+                    {
+                        lock_guard<mutex> lock(m_manager._mutex);
+                        string callId = callInfo.callIdString;
+                        
+                        // delete call from all maps
+                        m_manager._activeCalls.erase(callId);
+                        m_manager._inboundCalls.erase(callId);
+                        m_manager._outboundCalls.erase(callId);
+                    }
+                    break;
+            }
+}
+
+void PJSUA2Manager::PJSUA2Call::onCallMediaState(OnCallMediaStateParam &prm) {
+    CallInfo callInfo = getInfo();
+    // bind media
+    for(unsigned i = 0; i < callInfo.media.size(); i++){
+        if(callInfo.media[i].type == PJMEDIA_TYPE_AUDIO){
+            try{
+                AudioMedia aud_media = getAudioMedia(i);
+                // Connect the call audio media to the sound device
+                AudDevManager& audioDevManager = Endpoint::instance().audDevManager();
+                aud_media.startTransmit(audioDevManager.getPlaybackDevMedia());
+                audioDevManager.getCaptureDevMedia().startTransmit(aud_media);
+
+            }catch(const Error &e){
+                // if _onError is binded call them
+                m_manager._handle_error(e);
+                throw;
+            }
+            break;
         }
     }
-
-    virtual void onCallMediaState(OnCallMediaStateParam &prm) override{
-        CallInfo callInfo = getInfo();
-        // bind media
-        for(unsigned i = 0; i < callInfo.media.size(); i++){
-            if(callInfo.media[i].type == PJMEDIA_TYPE_AUDIO){
-                try{
-                    AudioMedia aud_media = getAudioMedia();
-                    // Connect the call audio media to the sound device
-                    AudDevManager& audioDevManager = Endpoint::instance().audDevManager();
-                    aud_media.startTransmit(audioDevManager.getPlaybackDevMedia());
-                    audioDevManager.getCaptureDevMedia().startTransmit(aud_media);
-
-                }catch(const Error &e){
-                    // if _onError is binded call them
-                    m_manager._handle_error(e);
-                    throw;
-                }
-                break;
-            }
-        }
-    };
 }
 
 PJSUA2Manager::PJSUA2Manager(
     const string& sip_user,
         const string& sip_password,
         const string& sip_domain,
-        DartIncomingCallStateCb onIncomingCallCb = nullptr,
-        DartOnRegStateCb onRegStateCb = nullptr,
-        DartCallStateCb onCallStateCb = nullptr,
-        DartOnErrorCb onErrorCb = nullptr
+        DartIncomingCallStateCb onIncomingCallCb,
+        DartOnRegStateCb onRegStateCb,
+        DartCallStateCb onCallStateCb,
+        DartOnErrorCb onErrorCb
 ):  _isRunning(false),_endpoint(nullptr), _account(nullptr){
      // set callbacks
     _onIncomingCallStateCb = onIncomingCallCb;
@@ -127,7 +121,7 @@ PJSUA2Manager::PJSUA2Manager(
     _onErrorCb = onErrorCb;
 
     try{
-        _endpoint = make_unique<Endpoint>();
+        _endpoint = unique_ptr<Endpoint>(new Endpoint());
 
 
 
@@ -168,7 +162,7 @@ PJSUA2Manager::PJSUA2Manager(
 
          _account = make_unique<PJSUA2Account>(*this);
          _account->create(accCfg);
-    }catch (Error &e){
+    }catch (const Error &e){
         _handle_error(e);
          throw;
     }           
@@ -185,9 +179,9 @@ PJSUA2Manager::~PJSUA2Manager(){
 
 void PJSUA2Manager::start_event_loop(unsigned timeout_ms){
     _isRunning.store(true, std::memory_order_release);
-    _eventThread = thread([this]() {
-    while (_isRunning.load(std::memory_order_relaxed)) {
-            this->handle_events(timeout_ms); 
+    _eventThread = thread([this, timeout_ms]() { 
+        while (_isRunning.load(std::memory_order_relaxed)) {
+                _handle_events(timeout_ms); 
         }
     });
 }
@@ -204,27 +198,27 @@ void PJSUA2Manager::stop_event_loop(){
     }
 }
 
-void PJSUA2Manager::_handle_error(Error &e){
+void PJSUA2Manager::_handle_error(const Error &e){
     if(_onErrorCb){
         _onErrorCb(
-            e.title().c_str(),
-            e.reason().c_str(),
+            e.title.c_str(),
+            e.reason.c_str(),
             e.info(true).c_str(),
-            e.srcFile().c_str(),
-            e.srcLine()
+            e.srcFile.c_str(),
+            e.srcLine
         );
     }else{
-        cout << e.title() << endl;
-        cout <<  e.reason() << endl;
+        cout << e.title << endl;
+        cout <<  e.reason << endl;
         cout << e.info(true) << endl;
-        cout << e.srcFile() << endl;
-        cout << e.srcLine() << endl;
+        cout << e.srcFile<< endl;
+        cout << e.srcLine << endl;
     }
 }
 
 string PJSUA2Manager::make_call(const string& dest_uri){
     try{
-        auto *newCall =make_unique<PJSUA2Call>(*this, *_account);
+        auto newCall =make_unique<PJSUA2Call>(*this, *_account, PJSUA_INVALID_ID);
         string callId = newCall->getInfo().callIdString;
         CallOpParam prm(true); // Use default call settings
         newCall->makeCall(dest_uri, prm);
@@ -284,7 +278,6 @@ void PJSUA2Manager::hang_up_call(const string& call_id){
         // Check and process call in inbound/outbound/active maps
         if (auto it = _inboundCalls.find(call_id); it != _inboundCalls.end()) {
             hangup_call(it->second.get(), PJSIP_SC_DECLINE);
-
         } 
         else if (auto it = _outboundCalls.find(call_id); it != _outboundCalls.end()) {
             hangup_call(it->second.get(), PJSIP_SC_REQUEST_TERMINATED);

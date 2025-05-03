@@ -5,8 +5,7 @@ test.cpp
 sip_call3
 
 # (Optional) Ignore the shared library if you don't want to track it
-libpjsua2_manager.so
-
+libpjsua2_wrapper.so
 # (Optional) Common build artifacts
 *.o
 *.lo

@@ -26,8 +26,8 @@ int pjsua2_answer_call(PJSUA2ManagerPtr mgr, const char* call_id);
 int pjsua2_get_call_info(PJSUA2ManagerPtr mgr, const char* call_id, CallData* output_data);
 
 
-void pjsua2_start_events_loop(unsigned timout_ms);
-void pjsua2_stop_events_loop();
+void pjsua2_start_events_loop(PJSUA2ManagerPtr mgr, unsigned timeout_ms);
+void pjsua2_stop_events_loop(PJSUA2ManagerPtr mgr);
 
 #ifdef __cplusplus
 }

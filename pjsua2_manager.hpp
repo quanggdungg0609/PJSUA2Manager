@@ -1,7 +1,10 @@
 #ifndef PJSUA2_MANAGER_H
 #define PJSUA2_MANAGER_H
 
+#define PJ_AUTOCONF 1
+
 #include <pjsua2.hpp>
+#include <pjsua-lib/pjsua.h>
 #include <unordered_map>
 #include <iostream>
 #include <mutex>
@@ -147,7 +150,7 @@ private:
      * 
      * @param e Reference to error object
      */
-    void _handle_error(Error &e);
+    void _handle_error(const Error &e);
 
     /**
      * @brief Nested class for SIP account management
@@ -161,12 +164,12 @@ private:
          /**
          * @brief Handle registration state changes
          */
-        void onRegState(OnRegStateParam &prm) override;
+        virtual void onRegState(OnRegStateParam &prm) override;
 
         /**
          * @brief Handle incoming calls
          */
-        void onIncomingCall(OnIncomingCallParam &prm) override;
+        virtual void onIncomingCall(OnIncomingCallParam &prm) override;
     };
 
     /**
@@ -181,12 +184,12 @@ private:
          /**
          * @brief Handle call state changes
          */
-        void onCallState(OnCallStateParam &prm) override;
+        virtual void onCallState(OnCallStateParam &prm) override;
 
         /**
          * @brief Handle media state changes
          */
-        void onCallMediaState(OnCallMediaStateParam &prm) override;
+        virtual void onCallMediaState(OnCallMediaStateParam &prm) override;
     };
 };
 
