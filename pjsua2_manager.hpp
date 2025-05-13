@@ -4,6 +4,8 @@
 #define PJ_AUTOCONF 1
 
 #include <pjsua2.hpp>
+#include "pjsua2_manager_interface.hpp"
+
 #include <pjsua-lib/pjsua.h>
 #include <unordered_map>
 #include <iostream>
@@ -42,7 +44,7 @@ typedef void (*DartOnErrorCb)(const char* title, const char* reason, const char*
  * Provides SIP account management, call control, and event handling capabilities.
  * Manages threading, synchronization, and interaction with PJSIP stack.
  */
-class PJSUA2Manager {
+class PJSUA2Manager : public IPJSUA2Manager {
 public:
 
     /**
