@@ -9,6 +9,7 @@
 #include <iostream>
 #include <mutex>
 #include <thread>
+#include <pthread.h>
 #include <atomic>
 #include <memory>
 
@@ -117,19 +118,24 @@ public:
     * @throw Error if call not found
     */
     CallData get_call_info(const string& call_id);
-
 private:
     friend class PJSUA2Account;  /**< Friend class for account management */
     friend class PJSUA2Call;     /**< Friend class for call operations */
 
+    pj_thread_desc _mainThreadDesc; 
     atomic<bool> _isRunning;                     /**< Event loop control flag */
     unique_ptr<Endpoint> _endpoint;               /**< PJSUA2 endpoint instance */
     unique_ptr<Account> _account;                 /**< SIP account instance */
     unordered_map<string, unique_ptr<Call>> _activeCalls;   /**< Active calls map */
     unordered_map<string, unique_ptr<Call>> _inboundCalls;  /**< Incoming calls map */
     unordered_map<string, unique_ptr<Call>> _outboundCalls; /**< Outgoing calls map */
-    mutex _mutex;                                 /**< Synchronization mutex */
     thread _eventThread;                          /**< Event processing thread */
+
+    // Mutex
+    recursive_mutex _activeCallsMutex;                                 /**< Synchronization active calls mutex */
+    recursive_mutex _inboundCallsMutex;                                 /**< Synchronization inbound calls mutex */
+    recursive_mutex _outboundCallsMutex;                                 /**< Synchronization outbound calls mutex */
+
 
     // Callback handlers
     DartIncomingCallStateCb _onIncomingCallStateCb; /**< Incoming call callback */

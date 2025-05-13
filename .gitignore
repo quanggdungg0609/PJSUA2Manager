@@ -1,8 +1,10 @@
 # Ignore the test file
 test.cpp
+test_pjsua2.cpp
 
 # Ignore the compiled binary
 sip_call3
+test_pjsua2
 
 # (Optional) Ignore the shared library if you don't want to track it
 libpjsua2_wrapper.so

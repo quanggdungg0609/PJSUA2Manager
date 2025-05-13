@@ -21,7 +21,7 @@ void PJSUA2Manager::PJSUA2Account::onIncomingCall(OnIncomingCallParam &prm) {
     string callId = call->getInfo().callIdString;
         
     {
-        lock_guard<mutex> lock(m_manager._mutex);
+        lock_guard<recursive_mutex> lock(m_manager._inboundCallsMutex);
         m_manager._inboundCalls[callId] = move(call);
     }
                     
@@ -55,30 +55,48 @@ void PJSUA2Manager::PJSUA2Call::onCallState(OnCallStateParam &prm) {
             break;
         case PJSIP_INV_STATE_CONNECTING:
             {
-                lock_guard<mutex> lock(m_manager._mutex);
+                lock_guard<recursive_mutex> lock(m_manager._inboundCallsMutex);
                 string callId = callInfo.callIdString;
+
                 if (auto it = m_manager._inboundCalls.find(callId); it != m_manager._inboundCalls.end()) {
+                    lock_guard<recursive_mutex> lock(m_manager._activeCallsMutex);
                     m_manager._activeCalls[callId] = std::move(it->second);
                     m_manager._inboundCalls.erase(it);
                 }
+                break;
+            }
+            {   
+                lock_guard<recursive_mutex> lock(m_manager._inboundCallsMutex);
+                string callId = callInfo.callIdString;
+
                 if (auto it = m_manager._outboundCalls.find(callId); it != m_manager._outboundCalls.end()) {
+                    lock_guard<recursive_mutex> lock(m_manager._activeCallsMutex);
                     m_manager._activeCalls[callId] = std::move(it->second);
                     m_manager._outboundCalls.erase(it);
+                    break;
                 }
             }
             break;
-                case PJSIP_INV_STATE_CONFIRMED:
+               
+
+        case PJSIP_INV_STATE_CONFIRMED:
                     break;
-                case PJSIP_INV_STATE_DISCONNECTED:
+        case PJSIP_INV_STATE_DISCONNECTED:
+                    string callId = callInfo.callIdString;
                     {
-                        lock_guard<mutex> lock(m_manager._mutex);
-                        string callId = callInfo.callIdString;
-                        
-                        // delete call from all maps
+                        lock_guard<recursive_mutex> lock(m_manager._activeCallsMutex);
                         m_manager._activeCalls.erase(callId);
+                    }
+                    // delete call from all maps
+                    {
+                        lock_guard<recursive_mutex> lock(m_manager._outboundCallsMutex);
                         m_manager._inboundCalls.erase(callId);
+                    }
+                    {
+                        lock_guard<recursive_mutex> lock(m_manager._inboundCallsMutex);
                         m_manager._outboundCalls.erase(callId);
                     }
+
                     break;
             }
 }
@@ -92,6 +110,7 @@ void PJSUA2Manager::PJSUA2Call::onCallMediaState(OnCallMediaStateParam &prm) {
                 AudioMedia aud_media = getAudioMedia(i);
                 // Connect the call audio media to the sound device
                 AudDevManager& audioDevManager = Endpoint::instance().audDevManager();
+                audioDevManager.refreshDevs();
                 aud_media.startTransmit(audioDevManager.getPlaybackDevMedia());
                 audioDevManager.getCaptureDevMedia().startTransmit(aud_media);
 
@@ -122,12 +141,10 @@ PJSUA2Manager::PJSUA2Manager(
 
     try{
         _endpoint = unique_ptr<Endpoint>(new Endpoint());
-
-
-
+       
+        
          // Initialize Endpoint
-         _endpoint->libCreate();
-
+        _endpoint->libCreate();
          EpConfig epConfig;
          epConfig.uaConfig.threadCnt = 1;
          epConfig.uaConfig.maxCalls = 2;
@@ -180,6 +197,12 @@ PJSUA2Manager::~PJSUA2Manager(){
 void PJSUA2Manager::start_event_loop(unsigned timeout_ms){
     _isRunning.store(true, std::memory_order_release);
     _eventThread = thread([this, timeout_ms]() { 
+        if(!_endpoint->libIsThreadRegistered()){
+            char threadName[16];
+            pthread_getname_np(pthread_self(), threadName, sizeof(threadName));
+            std::string name = threadName;
+            _endpoint->libRegisterThread(threadName);
+        }
         while (_isRunning.load(std::memory_order_relaxed)) {
                 _handle_events(timeout_ms); 
         }
@@ -187,7 +210,6 @@ void PJSUA2Manager::start_event_loop(unsigned timeout_ms){
 }
 
 void PJSUA2Manager::_handle_events(unsigned timeout_ms) {
-    lock_guard<mutex> lock(_mutex);
     _endpoint->libHandleEvents(timeout_ms);
 }
 
@@ -195,6 +217,7 @@ void PJSUA2Manager::stop_event_loop(){
     _isRunning = false;
     if (_eventThread.joinable()) {
         _eventThread.join();
+        _endpoint->libStopWorkerThreads();
     }
 }
 
@@ -218,11 +241,11 @@ void PJSUA2Manager::_handle_error(const Error &e){
 
 string PJSUA2Manager::make_call(const string& dest_uri){
     try{
-        auto newCall =make_unique<PJSUA2Call>(*this, *_account, PJSUA_INVALID_ID);
-        string callId = newCall->getInfo().callIdString;
+        auto newCall =make_unique<PJSUA2Call>(*this, *_account, 0);
         CallOpParam prm(true); // Use default call settings
         newCall->makeCall(dest_uri, prm);
-        lock_guard<mutex> lock(_mutex);
+        string callId = newCall->getInfo().callIdString;
+        lock_guard<recursive_mutex> lock(_outboundCallsMutex);
         _outboundCalls[callId] = move(newCall);
         return callId;
     }catch(const Error &e){
@@ -233,7 +256,7 @@ string PJSUA2Manager::make_call(const string& dest_uri){
 
 void PJSUA2Manager::answer_call(const string& call_id){
     try{
-        lock_guard<mutex> lock(_mutex);
+        lock_guard<recursive_mutex> lock(_inboundCallsMutex);
         auto it = _inboundCalls.find(call_id);
         if(it != _inboundCalls.end()){
             CallOpParam prm;
@@ -248,7 +271,6 @@ void PJSUA2Manager::answer_call(const string& call_id){
 
 void PJSUA2Manager::hang_up_call(const string& call_id){
     try {
-        lock_guard<mutex> lock(_mutex);
 
         // Helper function to handle hangup with appropriate status code
         auto hangup_call = [](Call* call, pjsip_status_code default_code) {
@@ -276,15 +298,25 @@ void PJSUA2Manager::hang_up_call(const string& call_id){
         };
 
         // Check and process call in inbound/outbound/active maps
-        if (auto it = _inboundCalls.find(call_id); it != _inboundCalls.end()) {
-            hangup_call(it->second.get(), PJSIP_SC_DECLINE);
-        } 
-        else if (auto it = _outboundCalls.find(call_id); it != _outboundCalls.end()) {
-            hangup_call(it->second.get(), PJSIP_SC_REQUEST_TERMINATED);
-        } 
-        else if (auto it = _activeCalls.find(call_id); it != _activeCalls.end()) {
-            hangup_call(it->second.get(), PJSIP_SC_BUSY_HERE);
+        {
+            lock_guard<recursive_mutex> lock(_inboundCallsMutex);
+            if (auto it = _inboundCalls.find(call_id); it != _inboundCalls.end()) {
+                hangup_call(it->second.get(), PJSIP_SC_DECLINE);
+            } 
         }
+        {
+            lock_guard<recursive_mutex> lock(_outboundCallsMutex);
+            if (auto it = _outboundCalls.find(call_id); it != _outboundCalls.end()) {
+                hangup_call(it->second.get(), PJSIP_SC_REQUEST_TERMINATED);
+            } 
+        }
+        {
+            lock_guard<recursive_mutex> lock(_activeCallsMutex);
+            if (auto it = _activeCalls.find(call_id); it != _activeCalls.end()) {
+                hangup_call(it->second.get(), PJSIP_SC_BUSY_HERE);
+            }
+        }
+       
 
     } catch (const Error& e) {
         _handle_error(e);
@@ -294,7 +326,6 @@ void PJSUA2Manager::hang_up_call(const string& call_id){
 
 
 CallData PJSUA2Manager::get_call_info(const string& call_id){
-    lock_guard<mutex> lock(_mutex);
     CallData result;
     memset(&result, 0, sizeof(result));
     const initializer_list<const decltype(_activeCalls)*> maps = {
@@ -302,7 +333,6 @@ CallData PJSUA2Manager::get_call_info(const string& call_id){
         &_inboundCalls, 
         &_outboundCalls
     };
-
     for (const auto& map : maps) {
         if (auto it = map->find(call_id); it != map->end()) {
             const CallInfo& ci = it->second->getInfo();
