@@ -4,8 +4,6 @@
 #define PJ_AUTOCONF 1
 
 #include <pjsua2.hpp>
-#include "pjsua2_manager_interface.hpp"
-
 #include <pjsua-lib/pjsua.h>
 #include <unordered_map>
 #include <iostream>
@@ -34,7 +32,7 @@ typedef struct {
 
 typedef void (*DartIncomingCallStateCb)(const char* call_id); /**< Incoming call state callback */
 typedef void (*DartOnRegStateCb)(int code, const char* status, const char* reason); /**< Registration state callback */
-typedef void (*DartCallStateCb)(const char* remote_uri, const char* state_text); /**< General call state callback */
+typedef void (*DartCallStateCb)(const char* call_id, const char* local_uri, const char* remote_uri, const char* state_text); /**< General call state callback */
 typedef void (*DartOnErrorCb)(const char* title, const char* reason, const char* info, const char* src_file, int src_line);  /**< Error reporting callback */
 
 
@@ -44,7 +42,7 @@ typedef void (*DartOnErrorCb)(const char* title, const char* reason, const char*
  * Provides SIP account management, call control, and event handling capabilities.
  * Manages threading, synchronization, and interaction with PJSIP stack.
  */
-class PJSUA2Manager : public IPJSUA2Manager {
+class PJSUA2Manager {
 public:
 
     /**
@@ -124,7 +122,6 @@ private:
     friend class PJSUA2Account;  /**< Friend class for account management */
     friend class PJSUA2Call;     /**< Friend class for call operations */
 
-    pj_thread_desc _mainThreadDesc; 
     atomic<bool> _isRunning;                     /**< Event loop control flag */
     unique_ptr<Endpoint> _endpoint;               /**< PJSUA2 endpoint instance */
     unique_ptr<Account> _account;                 /**< SIP account instance */
@@ -132,6 +129,10 @@ private:
     unordered_map<string, unique_ptr<Call>> _inboundCalls;  /**< Incoming calls map */
     unordered_map<string, unique_ptr<Call>> _outboundCalls; /**< Outgoing calls map */
     thread _eventThread;                          /**< Event processing thread */
+
+    // Account infos
+    string _sipDomain; /**< Sip domain */
+    string _sipUser; /**< Sip user */
 
     // Mutex
     recursive_mutex _activeCallsMutex;                                 /**< Synchronization active calls mutex */

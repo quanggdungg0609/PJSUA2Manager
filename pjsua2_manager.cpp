@@ -39,6 +39,8 @@ void PJSUA2Manager::PJSUA2Call::onCallState(OnCallStateParam &prm) {
             
     if(m_manager._onCallStateCb){
         m_manager._onCallStateCb(
+            callInfo.callIdString.c_str(),
+            callInfo.localUri.c_str(),
             callInfo.remoteUri.c_str(),
             callInfo.stateText.c_str()
         );
@@ -178,6 +180,8 @@ PJSUA2Manager::PJSUA2Manager(
          accCfg.sipConfig.authCreds.push_back(cred);
 
          _account = make_unique<PJSUA2Account>(*this);
+         _sipDomain = sip_domain;
+         _sipUser = sip_user;
          _account->create(accCfg);
     }catch (const Error &e){
         _handle_error(e);
@@ -243,7 +247,9 @@ string PJSUA2Manager::make_call(const string& dest_uri){
     try{
         auto newCall =make_unique<PJSUA2Call>(*this, *_account, 0);
         CallOpParam prm(true); // Use default call settings
-        newCall->makeCall(dest_uri, prm);
+        string sipFullDestUri = "sip:"+dest_uri+"@"+_sipDomain;
+
+        newCall->makeCall(sipFullDestUri, prm);
         string callId = newCall->getInfo().callIdString;
         lock_guard<recursive_mutex> lock(_outboundCallsMutex);
         _outboundCalls[callId] = move(newCall);
